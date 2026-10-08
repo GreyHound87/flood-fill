@@ -1,13 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import styles from './Board3D.module.css';
-import {
-  type CellChange,
-  type Color,
-  type Grid,
-  opposite,
-  SIZE,
-} from './grid.ts';
+import { type CellChange, type Grid, SIZE } from './grid.ts';
 
 const CELL = 1;
 const GAP = 0.15;
@@ -16,19 +10,23 @@ const FOV = 50;
 const HOVER_THROTTLE_MS = 50;
 const FLIP_DURATION_MS = 250;
 const STAGGER_MS = 40;
+const HALF_TURN = Math.PI;
 
 type Cell = { row: number; col: number };
 
-type Flip = { to: Color; startAt: number; swapped: boolean };
+type Tile = { group: THREE.Group; halves: [THREE.Mesh, THREE.Mesh] };
+
+type Flip = { fromRotation: number; startAt: number };
 
 type Board = {
-  meshes: THREE.Mesh[][];
-  colors: Color[][];
-  flips: Map<THREE.Mesh, Flip>;
-  applyMaterial: (mesh: THREE.Mesh, color: Color) => void;
+  tiles: Tile[][];
+  flips: Map<THREE.Group, Flip>;
 };
 
 const easeOutCubic = (p: number) => 1 - (1 - p) ** 3;
+
+const flipTarget = (flip: Flip) =>
+  (flip.fromRotation + HALF_TURN) % (HALF_TURN * 2);
 
 export function Board3D({
   grid,
@@ -64,7 +62,7 @@ export function Board3D({
     sun.position.set(6, 12, 4);
     scene.add(sun);
 
-    const geometry = new THREE.BoxGeometry(CELL, CELL, CELL);
+    const halfBox = new THREE.BoxGeometry(CELL, CELL / 2, CELL);
     const materials = {
       red: new THREE.MeshStandardMaterial({ color: '#ff453a' }),
       blue: new THREE.MeshStandardMaterial({ color: '#0a84ff' }),
@@ -83,38 +81,33 @@ export function Board3D({
     };
 
     const half = ((SIZE - 1) * SPACING) / 2;
-    const meshes: THREE.Mesh[][] = [];
-    const colors: Color[][] = [];
-    const clickables: THREE.Mesh[] = [];
+    const tiles: Tile[][] = [];
+    const clickables: THREE.Group[] = [];
 
     for (let row = 0; row < SIZE; row++) {
-      const line: THREE.Mesh[] = [];
-      const colorRow: Color[] = [];
+      const tileRow: Tile[] = [];
 
       for (let col = 0; col < SIZE; col++) {
-        const mesh = new THREE.Mesh(geometry, materials.blue);
-        mesh.position.set(col * SPACING - half, 0, row * SPACING - half);
-        scene.add(mesh);
-        line.push(mesh);
-        clickables.push(mesh);
-        colorRow.push('blue');
+        const top = new THREE.Mesh(halfBox, materials.red);
+        top.position.y = CELL / 4;
+        const bottom = new THREE.Mesh(halfBox, materials.blue);
+        bottom.position.y = -CELL / 4;
+
+        const group = new THREE.Group();
+        group.add(top, bottom);
+        group.position.set(col * SPACING - half, 0, row * SPACING - half);
+        scene.add(group);
+
+        tileRow.push({ group, halves: [top, bottom] });
+        clickables.push(group);
       }
 
-      meshes.push(line);
-      colors.push(colorRow);
+      tiles.push(tileRow);
     }
 
-    const flips = new Map<THREE.Mesh, Flip>();
+    const flips = new Map<THREE.Group, Flip>();
 
-    const applyMaterial = (mesh: THREE.Mesh, color: Color) => {
-      const hoveredCell = hoverRef.current;
-      const hovered =
-        hoveredCell !== null &&
-        meshes[hoveredCell.row][hoveredCell.col] === mesh;
-      mesh.material = hovered ? hoverMaterials[color] : materials[color];
-    };
-
-    boardRef.current = { meshes, colors, flips, applyMaterial };
+    boardRef.current = { tiles, flips };
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -132,20 +125,20 @@ export function Board3D({
       col: Math.round((point.x + half) / SPACING),
     });
 
+    const applyGlow = (tile: Tile, hovered: boolean) => {
+      const [top, bottom] = tile.halves;
+      top.material = hovered ? hoverMaterials.red : materials.red;
+      bottom.material = hovered ? hoverMaterials.blue : materials.blue;
+    };
+
     const setHover = (cell: Cell | null) => {
       const prev = hoverRef.current;
       if (prev?.row === cell?.row && prev?.col === cell?.col) return;
 
       hoverRef.current = cell;
 
-      if (prev) {
-        const mesh = meshes[prev.row][prev.col];
-        if (!flips.has(mesh)) applyMaterial(mesh, colors[prev.row][prev.col]);
-      }
-      if (cell) {
-        const mesh = meshes[cell.row][cell.col];
-        if (!flips.has(mesh)) applyMaterial(mesh, colors[cell.row][cell.col]);
-      }
+      if (prev) applyGlow(tiles[prev.row][prev.col], false);
+      if (cell) applyGlow(tiles[cell.row][cell.col], true);
       renderer.domElement.style.cursor = cell ? 'pointer' : 'default';
     };
 
@@ -153,19 +146,16 @@ export function Board3D({
       const now = performance.now();
 
       for (const { row, col, distance } of changed) {
-        const mesh = meshes[row][col];
-        const pending = flips.get(mesh);
+        const group = tiles[row][col].group;
+        const pending = flips.get(group);
         if (pending) {
-          mesh.rotation.x = 0;
-          applyMaterial(mesh, pending.to);
+          group.rotation.x = flipTarget(pending);
+          flips.delete(group);
         }
-        const to = opposite(colors[row][col]);
-        flips.set(mesh, {
-          to,
+        flips.set(group, {
+          fromRotation: group.rotation.x,
           startAt: now + distance * STAGGER_MS,
-          swapped: false,
         });
-        colors[row][col] = to;
       }
     };
 
@@ -220,23 +210,17 @@ export function Board3D({
     renderer.setAnimationLoop(() => {
       const now = performance.now();
 
-      for (const [mesh, flip] of flips) {
+      for (const [group, flip] of flips) {
         const p = (now - flip.startAt) / FLIP_DURATION_MS;
         if (p <= 0) continue;
 
         if (p >= 1) {
-          mesh.rotation.x = 0;
-          applyMaterial(mesh, flip.to);
-          flips.delete(mesh);
+          group.rotation.x = flipTarget(flip);
+          flips.delete(group);
           continue;
         }
 
-        const angle = easeOutCubic(p) * Math.PI;
-        mesh.rotation.x = angle;
-        if (!flip.swapped && angle >= Math.PI / 2) {
-          flip.swapped = true;
-          applyMaterial(mesh, flip.to);
-        }
+        group.rotation.x = flip.fromRotation + easeOutCubic(p) * HALF_TURN;
       }
 
       renderer.render(scene, camera);
@@ -250,7 +234,7 @@ export function Board3D({
       renderer.setAnimationLoop(null);
       renderer.dispose();
       renderer.domElement.remove();
-      geometry.dispose();
+      halfBox.dispose();
       materials.red.dispose();
       materials.blue.dispose();
       hoverMaterials.red.dispose();
@@ -266,15 +250,14 @@ export function Board3D({
 
     for (let row = 0; row < SIZE; row++) {
       for (let col = 0; col < SIZE; col++) {
-        const mesh = board.meshes[row][col];
-        board.colors[row][col] = grid[row][col];
-        const flip = board.flips.get(mesh);
-        if (flip && flip.to !== grid[row][col]) {
-          board.flips.delete(mesh);
-          mesh.rotation.x = 0;
+        const tile = board.tiles[row][col];
+        const targetRotation = grid[row][col] === 'red' ? 0 : HALF_TURN;
+        const flip = board.flips.get(tile.group);
+        if (flip && flipTarget(flip) !== targetRotation) {
+          board.flips.delete(tile.group);
         }
-        if (!board.flips.has(mesh)) {
-          board.applyMaterial(mesh, grid[row][col]);
+        if (!board.flips.has(tile.group)) {
+          tile.group.rotation.x = targetRotation;
         }
       }
     }

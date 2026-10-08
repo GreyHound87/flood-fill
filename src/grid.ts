@@ -22,7 +22,7 @@ export function createGrid(): Grid {
   return grid;
 }
 
-export function opposite(color: Color): Color {
+function opposite(color: Color): Color {
   return color === 'blue' ? 'red' : 'blue';
 }
 
