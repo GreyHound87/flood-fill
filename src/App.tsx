@@ -60,6 +60,9 @@ export function App() {
 
   return (
     <main>
+      <button type='button' onClick={() => setGrid(createGrid())}>
+        reset
+      </button>
       {grid.map((row, i) => {
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: key is stable
