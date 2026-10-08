@@ -4,9 +4,12 @@
 связную область смежных ячеек исходного цвета (по горизонтали/вертикали, без
 диагоналей).
 
+**Demo:** https://greyhound87.github.io/flood-fill/
+
 ## Стек
 
 - Vite
 - React 19
 - TypeScript
+- Three.js
 - Biome
