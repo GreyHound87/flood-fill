@@ -1,0 +1,8 @@
+.board {
+  flex: 1;
+  min-height: 0;
+}
+
+.board canvas {
+  display: block;
+}

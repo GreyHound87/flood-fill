@@ -1,0 +1,54 @@
+export type Color = 'red' | 'blue';
+export type Grid = Color[][];
+
+export const SIZE = 10;
+
+export function createGrid(): Grid {
+  const grid: Grid = [];
+
+  for (let i = 0; i < SIZE; i++) {
+    const row: Color[] = [];
+
+    for (let j = 0; j < SIZE; j++) {
+      const color = Math.random() < 0.5 ? 'red' : 'blue';
+      row.push(color);
+    }
+
+    grid.push(row);
+  }
+
+  return grid;
+}
+
+function opposite(color: Color): Color {
+  return color === 'blue' ? 'red' : 'blue';
+}
+
+export function floodFill(grid: Grid, row: number, col: number): Grid {
+  const target = grid[row][col];
+  const replacement = opposite(target);
+  const next = grid.map((r) => [...r]);
+
+  const queue: [number, number][] = [[row, col]];
+  next[row][col] = replacement;
+
+  for (let i = 0; i < queue.length; i++) {
+    const [r, c] = queue[i];
+    const neighbours = [
+      [r - 1, c],
+      [r + 1, c],
+      [r, c - 1],
+      [r, c + 1],
+    ].filter(([r, c]) => {
+      if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return false;
+      return next[r][c] === target;
+    });
+
+    neighbours.forEach(([r, c]) => {
+      next[r][c] = replacement;
+      queue.push([r, c]);
+    });
+  }
+
+  return next;
+}
