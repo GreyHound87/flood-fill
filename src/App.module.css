@@ -1,0 +1,7 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100dvh;
+  padding: 8px;
+}
