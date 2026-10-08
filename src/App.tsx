@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import styles from './App.module.css';
 import { Board3D } from './Board3D.tsx';
-import { createGrid, type Grid } from './grid.ts';
+import { createGrid, floodFill, type Grid } from './grid.ts';
 
 export function App() {
   const [grid, setGrid] = useState<Grid>(createGrid);
@@ -11,7 +11,10 @@ export function App() {
       <button type='button' onClick={() => setGrid(createGrid())}>
         reset
       </button>
-      <Board3D grid={grid} />
+      <Board3D
+        grid={grid}
+        onCellClick={(row, col) => setGrid((g) => floodFill(g, row, col))}
+      />
     </main>
   );
 }
