@@ -1,29 +1,41 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import styles from './Board3D.module.css';
-import { type Color, type Grid, SIZE } from './grid.ts';
+import {
+  type CellChange,
+  type Color,
+  type Grid,
+  opposite,
+  SIZE,
+} from './grid.ts';
 
 const CELL = 1;
 const GAP = 0.15;
 const SPACING = CELL + GAP;
 const FOV = 50;
 const HOVER_THROTTLE_MS = 50;
+const FLIP_DURATION_MS = 250;
+const STAGGER_MS = 40;
 
 type Cell = { row: number; col: number };
+
+type Flip = { to: Color; startAt: number; swapped: boolean };
 
 type Board = {
   meshes: THREE.Mesh[][];
   colors: Color[][];
-  materials: Record<Color, THREE.MeshStandardMaterial>;
-  hoverMaterials: Record<Color, THREE.MeshStandardMaterial>;
+  flips: Map<THREE.Mesh, Flip>;
+  applyMaterial: (mesh: THREE.Mesh, color: Color) => void;
 };
+
+const easeOutCubic = (p: number) => 1 - (1 - p) ** 3;
 
 export function Board3D({
   grid,
   onCellClick,
 }: {
   grid: Grid;
-  onCellClick: (row: number, col: number) => void;
+  onCellClick: (row: number, col: number) => CellChange[];
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<Board | null>(null);
@@ -92,7 +104,17 @@ export function Board3D({
       colors.push(colorRow);
     }
 
-    boardRef.current = { meshes, colors, materials, hoverMaterials };
+    const flips = new Map<THREE.Mesh, Flip>();
+
+    const applyMaterial = (mesh: THREE.Mesh, color: Color) => {
+      const hoveredCell = hoverRef.current;
+      const hovered =
+        hoveredCell !== null &&
+        meshes[hoveredCell.row][hoveredCell.col] === mesh;
+      mesh.material = hovered ? hoverMaterials[color] : materials[color];
+    };
+
+    boardRef.current = { meshes, colors, flips, applyMaterial };
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -114,16 +136,37 @@ export function Board3D({
       const prev = hoverRef.current;
       if (prev?.row === cell?.row && prev?.col === cell?.col) return;
 
+      hoverRef.current = cell;
+
       if (prev) {
-        meshes[prev.row][prev.col].material =
-          materials[colors[prev.row][prev.col]];
+        const mesh = meshes[prev.row][prev.col];
+        if (!flips.has(mesh)) applyMaterial(mesh, colors[prev.row][prev.col]);
       }
       if (cell) {
-        meshes[cell.row][cell.col].material =
-          hoverMaterials[colors[cell.row][cell.col]];
+        const mesh = meshes[cell.row][cell.col];
+        if (!flips.has(mesh)) applyMaterial(mesh, colors[cell.row][cell.col]);
       }
-      hoverRef.current = cell;
       renderer.domElement.style.cursor = cell ? 'pointer' : 'default';
+    };
+
+    const startWave = (changed: CellChange[]) => {
+      const now = performance.now();
+
+      for (const { row, col, distance } of changed) {
+        const mesh = meshes[row][col];
+        const pending = flips.get(mesh);
+        if (pending) {
+          mesh.rotation.x = 0;
+          applyMaterial(mesh, pending.to);
+        }
+        const to = opposite(colors[row][col]);
+        flips.set(mesh, {
+          to,
+          startAt: now + distance * STAGGER_MS,
+          swapped: false,
+        });
+        colors[row][col] = to;
+      }
     };
 
     let lastHoverCheck = 0;
@@ -144,7 +187,7 @@ export function Board3D({
       if (!hit) return;
 
       const { row, col } = cellAt(hit.point);
-      onCellClickRef.current(row, col);
+      startWave(onCellClickRef.current(row, col));
     };
 
     const onPointerLeave = () => setHover(null);
@@ -175,6 +218,27 @@ export function Board3D({
     resize();
 
     renderer.setAnimationLoop(() => {
+      const now = performance.now();
+
+      for (const [mesh, flip] of flips) {
+        const p = (now - flip.startAt) / FLIP_DURATION_MS;
+        if (p <= 0) continue;
+
+        if (p >= 1) {
+          mesh.rotation.x = 0;
+          applyMaterial(mesh, flip.to);
+          flips.delete(mesh);
+          continue;
+        }
+
+        const angle = easeOutCubic(p) * Math.PI;
+        mesh.rotation.x = angle;
+        if (!flip.swapped && angle >= Math.PI / 2) {
+          flip.swapped = true;
+          applyMaterial(mesh, flip.to);
+        }
+      }
+
       renderer.render(scene, camera);
     });
 
@@ -200,15 +264,18 @@ export function Board3D({
     const board = boardRef.current;
     if (!board) return;
 
-    const hovered = hoverRef.current;
-
     for (let row = 0; row < SIZE; row++) {
       for (let col = 0; col < SIZE; col++) {
+        const mesh = board.meshes[row][col];
         board.colors[row][col] = grid[row][col];
-        board.meshes[row][col].material =
-          hovered?.row === row && hovered?.col === col
-            ? board.hoverMaterials[grid[row][col]]
-            : board.materials[grid[row][col]];
+        const flip = board.flips.get(mesh);
+        if (flip && flip.to !== grid[row][col]) {
+          board.flips.delete(mesh);
+          mesh.rotation.x = 0;
+        }
+        if (!board.flips.has(mesh)) {
+          board.applyMaterial(mesh, grid[row][col]);
+        }
       }
     }
   }, [grid]);

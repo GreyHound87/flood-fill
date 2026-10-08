@@ -1,6 +1,8 @@
 export type Color = 'red' | 'blue';
 export type Grid = Color[][];
 
+export type CellChange = { row: number; col: number; distance: number };
+
 export const SIZE = 10;
 
 export function createGrid(): Grid {
@@ -20,20 +22,26 @@ export function createGrid(): Grid {
   return grid;
 }
 
-function opposite(color: Color): Color {
+export function opposite(color: Color): Color {
   return color === 'blue' ? 'red' : 'blue';
 }
 
-export function floodFill(grid: Grid, row: number, col: number): Grid {
+export function floodFill(
+  grid: Grid,
+  row: number,
+  col: number,
+): { grid: Grid; changed: CellChange[] } {
   const target = grid[row][col];
   const replacement = opposite(target);
   const next = grid.map((r) => [...r]);
+  const changed: CellChange[] = [];
 
-  const queue: [number, number][] = [[row, col]];
+  const queue: [number, number, number][] = [[row, col, 0]];
   next[row][col] = replacement;
+  changed.push({ row, col, distance: 0 });
 
   for (let i = 0; i < queue.length; i++) {
-    const [r, c] = queue[i];
+    const [r, c, distance] = queue[i];
     const neighbours = [
       [r - 1, c],
       [r + 1, c],
@@ -46,9 +54,10 @@ export function floodFill(grid: Grid, row: number, col: number): Grid {
 
     neighbours.forEach(([r, c]) => {
       next[r][c] = replacement;
-      queue.push([r, c]);
+      changed.push({ row: r, col: c, distance: distance + 1 });
+      queue.push([r, c, distance + 1]);
     });
   }
 
-  return next;
+  return { grid: next, changed };
 }

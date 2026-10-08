@@ -13,7 +13,11 @@ export function App() {
       </button>
       <Board3D
         grid={grid}
-        onCellClick={(row, col) => setGrid((g) => floodFill(g, row, col))}
+        onCellClick={(row, col) => {
+          const { grid: next, changed } = floodFill(grid, row, col);
+          setGrid(next);
+          return changed;
+        }}
       />
     </main>
   );
